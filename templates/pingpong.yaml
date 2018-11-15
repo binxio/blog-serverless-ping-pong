@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: pingpong
+
+Parameters:
+  S3Bucket:
+    Type: String
+  S3Key:
+    Type: String
+  S3Version:
+    Type: String
+
+Resources:
+  LambdaBasicExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+          Condition: {}
+      Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - arn:aws:iam::aws:policy/AmazonSNSFullAccess
+
+  PingFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: ping_function.handler
+      Runtime: python3.6
+      Role: !GetAtt LambdaBasicExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref S3Bucket
+        S3Key: !Ref S3Key
+        S3ObjectVersion: !Ref S3Version
+
+  PingFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${PingFunction}'
+      RetentionInDays: 30
+
+  PongFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: pong_function.handler
+      Runtime: python3.6
+      Role: !GetAtt LambdaBasicExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref S3Bucket
+        S3Key: !Ref S3Key
+        S3ObjectVersion: !Ref S3Version
+
+  PongFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${PongFunction}'
+      RetentionInDays: 30
+
+  CloudWatchEventsRule:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: rate(1 minute)
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt PingFunction.Arn
+        Id: scheduled-event
+
+  InvokeLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt PingFunction.Arn
+      Action: lambda:invokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt CloudWatchEventsRule.Arn
+
+  PingTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: ping-topic
+      Subscription:
+      - Endpoint: !GetAtt PongFunction.Arn
+        Protocol: lambda
+
+  PongTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: pong-topic
+      Subscription:
+      - Endpoint: !GetAtt PingFunction.Arn
+        Protocol: lambda
+
+  InvokePingPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt PingFunction.Arn
+      Action: lambda:invokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref PongTopic
+
+  InvokePongPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt PongFunction.Arn
+      Action: lambda:invokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref PingTopic

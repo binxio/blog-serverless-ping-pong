@@ -1,0 +1,3 @@
+project_code: serverless-ping-pong
+region: eu-west-1
+profile: default
